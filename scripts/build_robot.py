@@ -10,6 +10,22 @@ MODEL = ROOT / "urdf" / "robot.urdf"
 tree = ET.parse(ROOT / "urdf" / "vendor_robot.urdf")
 robot = tree.getroot()
 robot.set("name", "mypalletizer_260_pi_sim")
+# The real Pi linkage keeps the tool pointing down as the shoulder and elbow
+# move. The vendor URDF omits that linkage. Add a virtual leveling joint
+# before the wrist yaw joint; the socket bridge commands q_level = q2 + q3.
+wrist_yaw = robot.find("./joint[@name='joint5_to_joint4']")
+wrist_origin = wrist_yaw.find("origin")
+wrist_offset = wrist_origin.get("xyz")
+wrist_origin.set("xyz", "0 0 0")
+wrist_origin.tail = wrist_origin.tail.lstrip(" \t")
+wrist_yaw.find("parent").set("link", "wrist_level_link")
+ET.SubElement(robot, "link", name="wrist_level_link")
+level_joint = ET.SubElement(robot, "joint", name="wrist_level_joint", type="revolute")
+ET.SubElement(level_joint, "parent", link="link4")
+ET.SubElement(level_joint, "child", link="wrist_level_link")
+ET.SubElement(level_joint, "origin", xyz=wrist_offset, rpy="0 0 0")
+ET.SubElement(level_joint, "axis", xyz="0 0 1")
+ET.SubElement(level_joint, "limit", effort="12", lower="-3.14", upper="3.14", velocity="1.5")
 base_anchor = ET.SubElement(robot, "link", name="world")
 anchor_joint = ET.SubElement(robot, "joint", name="world_to_base", type="fixed")
 ET.SubElement(anchor_joint, "parent", link="world")
@@ -41,7 +57,7 @@ for link in robot.findall("link"):
 
 controlled = [
     "joint1_to_base", "joint2_to_joint1", "joint3_to_joint2",
-    "joint5_to_joint4", "gripper_controller",
+    "wrist_level_joint", "joint5_to_joint4", "gripper_controller",
 ]
 for joint in robot.findall("joint"):
     limit = joint.find("limit")

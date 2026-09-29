@@ -43,7 +43,10 @@ class PIDController:
         error
     ):
 
-        self.integral += error
+        self.integral = max(
+            -config.PID_INTEGRAL_LIMIT,
+            min(config.PID_INTEGRAL_LIMIT, self.integral + error)
+        )
 
         derivative = (
             error -
@@ -181,39 +184,17 @@ class ArmController:
             "get_angles failed"
         )
     
-    def coords_range_checker(self,coords):
-        print("chek now")
-        x2_y2=coords[0]**2 + coords[1]**2
-        print(f"x2_y2={x2_y2}")
-        r2 = config.ARM_RADIUS**2
-        if x2_y2 >r2:
-            if coords[0]>coords[1]:
-                if coords[0] > 0:
-                    print("OUT OF RANGE(X+)")
-                    self.shutdown()
-                    return "move_x+"
-                else:
-                    print("OUT OF RANGE(X-)")
-                    self.shutdown()
-                    return "move_x-"
-            else:
-                if coords[1] > 0:
-                    print("OUT OF RANGE(Y+)")
-                    self.shutdown()
-                    return "move_y+"
-                else:
-                    print("OUT OF RANGE(Y-)")
-                    self.shutdown()
-                    return "move_y-"
-        
-        if coords[2] > config.Z_COORD_UPPER:
-            print("OUT OF RANGE(Z_UPPER)")
-            self.shutdown()
-            return 
-        if coords[2] < config.Z_COORD_LOWER:
-            print("OUT OF RANGE(Z_LOWER)")
-            self.shutdown()
-            return 
+    def coords_range_checker(self, coords):
+        radius = math.hypot(coords[0], coords[1])
+        if radius > config.ARM_RADIUS:
+            raise ValueError(
+                f"XY target radius {radius:.1f} mm exceeds {config.ARM_RADIUS} mm"
+            )
+        if not config.Z_COORD_LOWER <= coords[2] <= config.Z_COORD_UPPER:
+            raise ValueError(
+                f"Z target {coords[2]:.1f} mm is outside "
+                f"{config.Z_COORD_LOWER}..{config.Z_COORD_UPPER} mm"
+            )
     # def coodrs_range_checker(self,coords):
     #     if coords[0] > config.X_COORD_UPPER:
     #         print("OUT OF RANGE(X_UPPER)")
@@ -286,6 +267,16 @@ class ArmController:
 
         )
 
+        if os.getenv("SIM_CAMERA") == "1":
+            actual = self.get_coords_safe()
+            error = math.dist(actual[:3], config.SEARCH_COORDS[:3])
+            print(f"Search pose actual: {actual}; position error: {error:.1f} mm", flush=True)
+            if error > 25:
+                raise RuntimeError(
+                    "Search pose was not reached in Gazebo. Check that arm_controller is active "
+                    "and inspect docker compose logs sim."
+                )
+
     # ======================================================
     # Camera
     # ======================================================
@@ -316,7 +307,20 @@ class ArmController:
         self.pid_x.reset()
         self.pid_y.reset()
 
+        sim_mode = os.getenv("SIM_CAMERA") == "1"
+        started = time.monotonic()
+        next_scan = started + config.SIM_SEARCH_SCAN_INTERVAL_SEC
+        scan_offsets = (-config.SIM_SEARCH_SWEEP_DEG,
+                        config.SIM_SEARCH_SWEEP_DEG, 0)
+        scan_index = 0
+        search_base = self.get_angles_safe()[0] if sim_mode else 0
+        last_status = ""
+        stalled_moves = 0
+
         while True:
+
+            if sim_mode and time.monotonic() - started >= config.SIM_SERVO_TIMEOUT_SEC:
+                raise RuntimeError("Visual servo did not converge within the simulation time limit")
 
             target = self.camera.update(
 
@@ -327,6 +331,29 @@ class ArmController:
             )
 
             if target is None:
+
+                if sim_mode:
+                    now = time.monotonic()
+                    status = self.camera.detection_status
+                    if status != last_status:
+                        print(f"Searching: {status}", flush=True)
+                        last_status = status
+                    if now - started >= config.SIM_SEARCH_TIMEOUT_SEC:
+                        if self.camera.color_image is not None:
+                            import cv2
+                            cv2.imwrite("/opt/sim/search_failure.png", self.camera.color_image)
+                        raise RuntimeError(
+                            f"No {target_color} {target_shape} after "
+                            f"{config.SIM_SEARCH_TIMEOUT_SEC}s ({status}). "
+                            "Copy /opt/sim/search_failure.png from the container to inspect the view."
+                        )
+                    if now >= next_scan:
+                        angles = self.get_angles_safe()
+                        angles[0] = search_base + scan_offsets[scan_index]
+                        print(f"Search sweep: base joint to {angles[0]:.1f} degrees", flush=True)
+                        self.mc.sync_send_angles(angles, config.SEARCH_SPEED)
+                        scan_index = (scan_index + 1) % len(scan_offsets)
+                        next_scan = time.monotonic() + config.SIM_SEARCH_SCAN_INTERVAL_SEC
 
                 continue
 
@@ -354,7 +381,7 @@ class ArmController:
 
             print("Target")
 
-            print(target)
+            print({key: target[key] for key in ("cx", "cy", "angle", "depth", "color", "shape")})
 
             print()
 
@@ -416,6 +443,11 @@ class ArmController:
 
             )
 
+            if sim_mode:
+                limit = config.SIM_SERVO_MAX_STEP_MM
+                move_x = max(-limit, min(limit, move_x))
+                move_y = max(-limit, min(limit, move_y))
+
             coords = self.get_coords_safe()
 
             # --------------------------------------
@@ -475,8 +507,18 @@ class ArmController:
                 15
 
             )
-
-            time.sleep(0.05)
+            if sim_mode:
+                time.sleep(0.8)
+                actual = self.get_coords_safe()
+                moved = math.dist(actual[:3], coords[:3])
+                stalled_moves = stalled_moves + 1 if moved < config.SIM_SERVO_STALL_MM else 0
+                if stalled_moves >= config.SIM_SERVO_STALL_LIMIT:
+                    raise RuntimeError(
+                        f"Visual servo requested motion but Gazebo did not move "
+                        f"(last request {target_coords}, actual {actual})."
+                    )
+            else:
+                time.sleep(0.05)
 
 # ==========================================================
 # arm_controller.py
@@ -670,6 +712,11 @@ class ArmController:
 
             depth = config.DEFAULT_DEPTH
 
+        tool_offset = (
+            config.SIM_TOOL_OFFSET if os.getenv("SIM_CAMERA") == "1"
+            else config.TOOL_OFFSET
+        )
+
         descend = (
 
             depth
@@ -680,7 +727,7 @@ class ArmController:
 
             -
 
-            config.TOOL_OFFSET
+            tool_offset
 
         )
 
@@ -703,6 +750,13 @@ class ArmController:
         print("Descend")
 
         print(target)
+
+        if descend <= 0:
+            raise ValueError(
+                f"Camera depth {depth:.1f} mm is too short for tool offset "
+                f"{tool_offset:.1f} mm; descent would move upward"
+            )
+        self.coords_range_checker(target)
 
         # 開く
         self.open_gripper()

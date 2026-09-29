@@ -93,6 +93,8 @@ class CameraController:
 
         self.last_mask = None
 
+        self.detection_status = "camera not started"
+
     # ==========================================================
     # Camera
     # ==========================================================
@@ -722,6 +724,7 @@ class CameraController:
         color_image, depth_frame = self.get_frames()
 
         if color_image is None:
+            self.detection_status = "camera frame unavailable"
             return None
 
         # ======================================================
@@ -738,6 +741,7 @@ class CameraController:
             if len(candidates) == 0:
 
                 self.last_target = None
+                self.detection_status = f"YOLO found no {target_shape}"
 
                 return None
 
@@ -815,10 +819,12 @@ class CameraController:
                 self.lost_count = 0
 
                 self.last_target = target
+                self.detection_status = "target detected"
 
                 return target
 
             self.last_target = None
+            self.detection_status = f"YOLO found {len(candidates)} candidate(s), but no {target_color} contour"
 
             return None
 

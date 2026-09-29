@@ -2,6 +2,8 @@
 # main.py
 # ==========================================================
 
+import os
+
 from arm_controller import ArmController
 
 
@@ -81,7 +83,10 @@ def main():
         print("Result")
         print("------------------------------")
 
-        print(target)
+        print({
+            key: target[key]
+            for key in ("cx", "cy", "angle", "depth", "color", "shape")
+        })
 
         print()
 
@@ -91,7 +96,10 @@ def main():
 
         print()
 
-        print("Mission Complete")
+        if os.getenv("SIM_CAMERA") == "1":
+            print("Simulation motion complete (physical grasp is not enabled)")
+        else:
+            print("Mission Complete")
 
     except KeyboardInterrupt:
 

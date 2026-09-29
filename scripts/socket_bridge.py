@@ -20,10 +20,17 @@ from builtin_interfaces.msg import Duration
 
 
 ARM = ["joint1_to_base", "joint2_to_joint1", "joint3_to_joint2", "joint5_to_joint4"]
+CONTROLLED_ARM = ARM[:3] + ["wrist_level_joint", ARM[3]]
 ROBOT = ET.parse('/opt/sim/urdf/robot.urdf').getroot()
 JOINTS = {j.get('name'): j for j in ROBOT.findall('joint')}
 CHAIN = ['joint1_to_base', 'joint2_to_joint1', 'joint3_to_joint2',
-         'joint4_to_joint3', 'joint5_to_joint4']
+         'joint4_to_joint3', 'wrist_level_joint', 'joint5_to_joint4']
+ANGLE_INDEX = {
+    'joint1_to_base': 0,
+    'joint2_to_joint1': 1,
+    'joint3_to_joint2': 2,
+    'joint5_to_joint4': 3,
+}
 LIMITS = [(-2.824, 2.824), (-0.0349, 1.5708), (-1.6057, 1.0471), (-3.14, 3.14)]
 
 
@@ -44,15 +51,13 @@ def transform(xyz, rpy):
 
 def fk(angles):
     matrix = np.eye(4)
-    index = 0
     for name in CHAIN:
         joint = JOINTS[name]
         origin = joint.find('origin')
         matrix = matrix @ transform(origin.get('xyz'), origin.get('rpy'))
         if joint.get('type') == 'revolute':
             axis = np.array([float(v) for v in joint.find('axis').get('xyz').split()])
-            theta = angles[index]
-            index += 1
+            theta = angles[1] + angles[2] if name == 'wrist_level_joint' else angles[ANGLE_INDEX[name]]
             if np.allclose(axis, [0, 0, 1]):
                 matrix = matrix @ transform('0 0 0', f'0 0 {theta}')
     return matrix
@@ -158,8 +163,27 @@ class Bridge(Node):
                         math.atan2(math.sin(yaw - goal_yaw), math.cos(yaw - goal_yaw))]
 
             result = least_squares(error, np.clip(angles, lower, upper), bounds=(lower, upper), max_nfev=100)
-            if np.linalg.norm(fk(result.x)[:3, 3] - goal_xyz) > 0.02:
-                self.get_logger().warn('Cartesian goal outside 20 mm tolerance; refusing motion')
+            position_error = np.linalg.norm(fk(result.x)[:3, 3] - goal_xyz)
+            # A home-pose seed can sit at a stationary point of the numerical
+            # Jacobian. Retry from two ordinary elbow configurations before
+            # declaring a reachable Cartesian request impossible.
+            if position_error > 0.02:
+                for seed in ([angles[0], -0.03, 0.4, angles[3]],
+                             [angles[0], 0.3, -0.4, angles[3]]):
+                    alternative = least_squares(
+                        error, np.clip(seed, lower, upper),
+                        bounds=(lower, upper), max_nfev=100
+                    )
+                    alternative_error = np.linalg.norm(fk(alternative.x)[:3, 3] - goal_xyz)
+                    if alternative_error < position_error:
+                        result, position_error = alternative, alternative_error
+            if position_error > 0.02:
+                self.get_logger().warn(
+                    f'Cartesian goal {goal_xyz.tolist()} m, yaw={math.degrees(goal_yaw):.1f} deg '
+                    f'outside 20 mm tolerance (seed={np.degrees(angles).round(1).tolist()} deg, '
+                    f'best={np.degrees(result.x).round(1).tolist()} deg, '
+                    f'error={position_error * 1000:.1f} mm); refusing motion'
+                )
             else:
                 self.command_arm(result.x, max(1, data[8]))
             return None
@@ -177,7 +201,11 @@ class Bridge(Node):
             present = self.angles.copy()
             self.target = np.asarray(goal)
         seconds = max(1.0, float(np.max(np.abs(goal - present))) / (speed / 100 * 1.5))
-        self.move(self.arm_pub, ARM, goal, seconds)
+        # The vendor model lacks the passive parallelogram linkage. Moving
+        # this virtual joint with the shoulder and elbow keeps the gripper's
+        # grasp axis vertical throughout each synchronized trajectory.
+        controlled_goal = [*goal[:3], goal[1] + goal[2], goal[3]]
+        self.move(self.arm_pub, CONTROLLED_ARM, controlled_goal, seconds)
 
 
 if __name__ == '__main__':

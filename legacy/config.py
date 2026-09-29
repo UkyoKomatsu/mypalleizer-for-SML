@@ -154,6 +154,17 @@ MOVE_SPEED = 20
 
 SEARCH_SPEED = 40
 
+# Simulation-only search behavior when the camera cannot see the block.
+SIM_SEARCH_TIMEOUT_SEC = 45
+SIM_SEARCH_SCAN_INTERVAL_SEC = 5
+SIM_SEARCH_SWEEP_DEG = 20
+SIM_SERVO_TIMEOUT_SEC = 90
+SIM_SERVO_MAX_STEP_MM = 8
+SIM_SERVO_STALL_MM = 1
+SIM_SERVO_STALL_LIMIT = 3
+PID_INTEGRAL_LIMIT = 100
+SIM_TOOL_OFFSET = 40
+
 
 # ==========================================
 # Gripper

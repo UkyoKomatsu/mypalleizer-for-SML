@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <world name="lego_lab">
+    <include><uri>model://ground_plane</uri></include>
+    <include><uri>model://sun</uri></include>
+    <model name="red_duplo_2x2">
+      <pose>0.13 -0.075 0.0096 0 0 0</pose>
+      <link name="brick">
+        <collision name="body"><geometry><box><size>0.0318 0.0318 0.0192</size></box></geometry></collision>
+        <visual name="body"><geometry><box><size>0.0318 0.0318 0.0192</size></box></geometry><material><ambient>0.8 0.03 0.03 1</ambient><diffuse>0.8 0.03 0.03 1</diffuse></material></visual>
+        <visual name="stud_1"><pose>-0.008 -0.008 0.0118 0 0 0</pose><geometry><cylinder><radius>0.0047</radius><length>0.0044</length></cylinder></geometry><material><ambient>0.8 0.03 0.03 1</ambient><diffuse>0.8 0.03 0.03 1</diffuse></material></visual>
+        <visual name="stud_2"><pose>0.008 -0.008 0.0118 0 0 0</pose><geometry><cylinder><radius>0.0047</radius><length>0.0044</length></cylinder></geometry><material><ambient>0.8 0.03 0.03 1</ambient><diffuse>0.8 0.03 0.03 1</diffuse></material></visual>
+        <visual name="stud_3"><pose>-0.008 0.008 0.0118 0 0 0</pose><geometry><cylinder><radius>0.0047</radius><length>0.0044</length></cylinder></geometry><material><ambient>0.8 0.03 0.03 1</ambient><diffuse>0.8 0.03 0.03 1</diffuse></material></visual>
+        <visual name="stud_4"><pose>0.008 0.008 0.0118 0 0 0</pose><geometry><cylinder><radius>0.0047</radius><length>0.0044</length></cylinder></geometry><material><ambient>0.8 0.03 0.03 1</ambient><diffuse>0.8 0.03 0.03 1</diffuse></material></visual>
+      </link>
+    </model>
+  </world>
+</sdf>

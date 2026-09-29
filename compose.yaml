@@ -1,0 +1,11 @@
+services:
+  sim:
+    build: .
+    ports:
+      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:9000:9000"
+    shm_size: 1gb
+    environment:
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - SIM_CAMERA=1
+      - MYPALLETIZER_HOST=127.0.0.1

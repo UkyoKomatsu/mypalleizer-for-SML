@@ -1,0 +1,9 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.yaml text eol=lf
+*.world text eol=lf
+*.urdf text eol=lf
+Dockerfile text eol=lf
+*.dae binary
+*.pt binary
+*.png binary
